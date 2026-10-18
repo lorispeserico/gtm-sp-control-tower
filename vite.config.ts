@@ -2,7 +2,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import path from 'path' // <-- Add this new import
+import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -10,10 +10,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  // Add the resolve block below
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      // Use import.meta.url to get the current directory
+      '@': path.resolve(new URL('.', import.meta.url).pathname, './src'),
     },
   },
   test: {

@@ -1,5 +1,5 @@
 // FILE: src/App.tsx
-import { ControlTowerDashboard } from './views/ControlTowerDashboard';
+import ControlTowerDashboard from './views/ControlTowerDashboard';
 
 function App() {
   return (

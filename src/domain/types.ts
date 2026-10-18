@@ -128,3 +128,27 @@ export interface ChangeRequest {
   }>;
   status: 'Draft' | 'Submitted' | 'Approved' | 'Pending_Execution' | 'Reconciled';
 }
+export interface ScenarioState {
+  id: string;
+  name: string;
+  projectId: string;
+  // Maps a specific milestone type to a custom lag override (e.g., {"Proto": 10})
+  lagOverrides: Record<string, number>; 
+  // Maps a specific milestone type to a custom date override (e.g., {"Launch": "2027-04-30"})
+  dateOverrides: Record<string, string>;
+  // Active toggle to simulate an extra sample round (adds positive lag)
+  extraSampleRound: boolean;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string; // ISO 8601 string
+  actor: string;
+  actionType: 'CREATE_SCENARIO' | 'UPDATE_SCENARIO' | 'APPROVE_CR' | 'SYNC_DATA';
+  details: string;
+}
+export interface IStorageProvider {
+  read<T>(storeName: string): Promise<T[]>;
+  write<T>(storeName: string, data: T[]): Promise<boolean>;
+  clear(storeName: string): Promise<boolean>;
+}
