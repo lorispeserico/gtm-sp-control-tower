@@ -1,154 +1,80 @@
 // FILE: src/domain/types.ts
+// This file is now updated to precisely match the GTM_App_Database schema.
 
 export type Season = 'SS26' | 'FW26' | 'SS27' | 'FW27' | 'SS28' | 'FW28';
 export type Category = 'Apparel' | 'Footwear' | 'Accessories';
+export type Department = 'Performance' | 'Lifestyle' | 'Collaborations';
+export type CalendarType = 'WORKING_DAYS' | 'CALENDAR_DAYS';
 
-export type MilestoneType = 
-  | 'Kickoff' 
-  | 'Brief_Lock' 
-  | 'Proto' 
-  | 'Wear_Test' 
-  | 'LR1' 
-  | 'SMS' 
-  | 'LR2' 
-  | 'Buy_Ready' 
-  | 'Commercial_Handover' 
-  | 'Launch';
-
-export type DependencyType = 'FS' | 'SS' | 'FF' | 'SF';
-export type RelationshipState = 'CONFIRMED' | 'CANDIDATE' | 'AMBIGUOUS' | 'UNMATCHED';
-
+// Corresponds to the 'projects' tab
 export interface Project {
-  id: string;
+  project_id: string;
   name: string;
-  season: Season;
-  category: Category;
-  collabPartner?: string;
-  isFixedTarget: boolean;
-  launchDateFixed: string; // ISO 8601 Date String (YYYY-MM-DD)
-  status: 'On_Time' | 'At_Risk' | 'Delayed';
+  primary_season_id: Season;
+  department_id: Department;
+  smartsheet_source_url?: string;
 }
 
+// Corresponds to the 'styles' tab
 export interface Style {
-  id: string;
-  projectId: string;
-  styleCode: string;
-  styleName: string;
-  materials: string[];
+  style_number: string;
+  style_name: string;
+  development_name?: string;
 }
 
-export interface Material {
-  id: string;
-  materialCode: string;
-  name: string;
-  supplier: string;
-  status: string;
-  expectedAvailability: string; // YYYY-MM-DD
+// Corresponds to the 'project_style_bindings' tab
+export interface ProjectStyleBinding {
+  binding_id: string;
+  project_id: string;
+  style_number: string;
 }
 
-export interface Dependency {
-  id: string;
-  predecessorMilestoneId: string;
-  successorMilestoneId: string;
-  type: DependencyType;
-  lag: number; // Positive gap or negative lag
-  lagUnit: 'WorkingDays' | 'CalendarDays';
-}
-
+// Corresponds to the 'milestones' tab
 export interface Milestone {
-  id: string;
-  projectId: string;
-  type: MilestoneType;
-  sourceTaskName: string; // Verbatim name from source
-  baselineDate: string; // YYYY-MM-DD
-  status: 'Not_Started' | 'In_Progress' | 'Complete';
+  node_id: string;
+  project_id: string;
+  standard_task_code: string; // e.g., "LR1", "PROTO"
+  custom_task_label: string; // The verbatim name from Smartsheet
+  duration_days: number;
+  calendar_type: CalendarType;
+  target_baseline_date: string; // YYYY-MM-DD
 }
 
-export interface OperationalSignal {
-  id: string;
-  sourceSystem: 'Material_Tracker' | 'Testing_Tracker' | 'Buy_Ready_Tracker' | 'STS_Tracker';
-  entityRef: string; // Material ID or Style ID
-  signalType: 'Material_Delay' | 'Testing_Failure' | 'STS_Delayed' | 'Buy_Ready_Slipped';
-  expectedDate: string; // YYYY-MM-DD
-  statusValue: string;
-}
-
+// This is not a database table, but the output of our scheduler
 export interface ComputedMilestoneSchedule {
-  milestoneId: string;
-  projectId: string;
-  type: MilestoneType;
-  baselineDate: string;
-  forecastDate: string;
-  latestAllowableDate: string; // Derived from backward pass
-  varianceDays: number; // Forecast - Baseline
-  floatDays: number; // Buffer days before delay touches fixed target
-  deficitDays: number; // Number of days forecast exceeds fixed target limit
-  isCriticalPath: boolean;
-  isWorkBlocker: boolean;
+  node_id: string;
+  project_id: string;
+  standard_task_code: string;
+  target_baseline_date: string;
+  forecast_working_date: string;
+  is_critical_path: boolean;
+  total_float_days: number;
+  deficit_days: number;
 }
 
-export interface ProjectAlias {
-  canonicalId: string;
-  displayName: string;
-  aliases: string[];
-  season: Season;
-  category: Category;
-}
-
-export interface RelationshipMatch {
-  id: string;
-  sourceRef: string;
-  canonicalId: string;
-  state: RelationshipState;
-  confidenceScore: number; // 0 to 100
-}
-
-export interface CalendarDefinition {
-  holidays: Set<string>; // Set of "YYYY-MM-DD"
-  factoryClosures: Array<{
-    supplierId: string;
-    startDate: string;
-    endDate: string;
-  }>;
-}
-
-export interface Scenario {
-  id: string;
-  name: string;
-  projectId: string;
-  signalOverrides: Record<string, string>; // Maps signal ID -> hypothetical date YYYY-MM-DD
+// The interfaces for ScenarioState, ChangeRequest, and AuditLogEntry remain conceptually similar
+// but will now reference the new primary keys (project_id, node_id, etc.)
+export interface ScenarioState {
+    id: string;
+    name: string;
+    projectId: string;
+    lagOverrides: Record<string, number>;
+    dateOverrides: Record<string, string>;
+    extraSampleRound: boolean;
 }
 
 export interface ChangeRequest {
-  id: string;
-  projectId: string;
-  proposedChanges: Array<{
-    milestoneType: MilestoneType;
-    newTargetDate: string;
-  }>;
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Pending_Execution' | 'Reconciled';
-}
-export interface ScenarioState {
-  id: string;
-  name: string;
-  projectId: string;
-  // Maps a specific milestone type to a custom lag override (e.g., {"Proto": 10})
-  lagOverrides: Record<string, number>; 
-  // Maps a specific milestone type to a custom date override (e.g., {"Launch": "2027-04-30"})
-  dateOverrides: Record<string, string>;
-  // Active toggle to simulate an extra sample round (adds positive lag)
-  extraSampleRound: boolean;
+    cr_id: string;
+    project_id: string;
+    status: 'Draft' | 'Approved' | 'Pending_Execution' | 'Reconciled';
+    // ... other fields from your change_requests table
 }
 
 export interface AuditLogEntry {
-  id: string;
-  timestamp: string; // ISO 8601 string
-  actor: string;
-  actionType: 'CREATE_SCENARIO' | 'UPDATE_SCENARIO' | 'APPROVE_CR' | 'SYNC_DATA';
-  details: string;
-}
-export interface IStorageProvider {
-  read<T>(storeName: string): Promise<T[]>;
-  write<T>(storeName: string, data: T[]): Promise<boolean>;
-  clear(storeName: string): Promise<boolean>;
+    audit_event_id: string;
+    timestamp_utc: string;
+    user_email: string;
+    project_id: string;
+    action_type: string;
+    details_json: string;
 }

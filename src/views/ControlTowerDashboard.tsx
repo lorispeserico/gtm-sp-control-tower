@@ -1,130 +1,131 @@
 // FILE: src/views/ControlTowerDashboard.tsx
-import React, { useState, useMemo } from 'react';
-import { Season, Category, ScenarioState } from '../domain/types';
-import { CalendarEngine } from '../engine/CalendarEngine';
-import { DeterministicScheduler } from '../engine/DeterministicScheduler';
-import { SyntheticDataAdapter } from '../adapters/SyntheticDataAdapter';
-import { TimelineAxis } from '../components/TimelineAxis';
-import { ProjectSwimlane } from '../components/ProjectSwimlane';
-import { ControlBar } from '../components/ControlBar';
-import { ScenarioDrawer } from '../components/ScenarioDrawer';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Project, Season, Category, Milestone } from '@/domain/types';
+import { CalendarEngine } from '@/engine/CalendarEngine';
+import { DeterministicScheduler } from '@/engine/DeterministicScheduler';
+import { fetchDataFromGoogleSheets, AppData } from '@/adapters/GoogleSheetsAdapter';
+import { TimelineAxis } from '@/components/TimelineAxis';
+import { ProjectSwimlane } from '@/components/ProjectSwimlane';
+import { ControlBar } from '@/components/ControlBar';
 
-const initialScenarioState: ScenarioState = {
-  id: 'temp-scenario',
-  name: 'Default Scenario',
-  projectId: '',
-  lagOverrides: {},
-  dateOverrides: {},
-  extraSampleRound: false,
-};
-
-const ControlTowerDashboard: React.FC = () => {
+export const ControlTowerDashboard: React.FC = () => {
   const [selectedSeason, setSelectedSeason] = useState<Season | 'ALL'>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<Category | 'ALL'>('ALL');
   const [selectedTeam, setSelectedTeam] = useState<string | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [rawData, setRawData] = useState<AppData | null>(null);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<'monthly' | 'weekly'>('monthly');
 
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [activeScenario, setActiveScenario] = useState<ScenarioState>(initialScenarioState);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-
-  const calendarEngine = useMemo(() => new CalendarEngine(SyntheticDataAdapter.getMockCalendarConfig()), []);
+  const calendarEngine = useMemo(() => new CalendarEngine({ holidays: new Set(), factoryClosures: [] }), []);
   const scheduler = useMemo(() => new DeterministicScheduler(calendarEngine), [calendarEngine]);
-  const rawData = useMemo(() => SyntheticDataAdapter.getScenarioData(), []);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const data = await fetchDataFromGoogleSheets();
+        if(!data.projects || data.projects.length === 0) {
+          setLoadingError("Data loaded, but no projects were found in the 'projects' tab of your Google Sheet. Please check your data.");
+          return;
+        }
+        setRawData(data);
+      } catch (error: any) {
+        setLoadingError(error?.message || "An unknown error occurred while fetching data.");
+      }
+    };
+    loadData();
+  }, []);
 
   const calculatedSchedules = useMemo(() => {
+    if (!rawData) return [];
     return rawData.projects.map(proj => {
-      const projMilestones = rawData.milestones.filter(m => m.projectId === proj.id);
-      const projDeps = rawData.dependencies.filter(d => projMilestones.some(m => m.id === d.predecessorMilestoneId));
-      return { project: proj, schedules: scheduler.calculateSchedules(proj, projMilestones, projDeps) };
+      const projMilestones = (rawData.milestones || []).filter((m: Milestone) => m.project_id === proj.project_id);
+      const allDeps = (rawData as any).dependencies || [];
+      const projDeps = allDeps.filter((d: any) => projMilestones.some(m => m.node_id === d.predecessorId || m.node_id === d.successorId));
+      const computedSchedules = scheduler.calculateSchedules(proj, projMilestones, projDeps);
+      return { project: proj, schedules: computedSchedules };
     });
   }, [rawData, scheduler]);
 
-  const scenarioSchedules = useMemo(() => {
-    if (!selectedProjectId) return null;
-    const projectData = rawData.projects.find(p => p.id === selectedProjectId);
-    if (!projectData) return null;
-
-    const projMilestones = rawData.milestones.filter(m => m.projectId === selectedProjectId);
-    const projDeps = rawData.dependencies.filter(d => projMilestones.some(m => m.id === d.predecessorMilestoneId));
-
-    return scheduler.calculateScenario(projectData, projMilestones, projDeps, activeScenario);
-  }, [activeScenario, selectedProjectId, rawData, scheduler]);
-
   const filteredRows = useMemo(() => {
+    if (!calculatedSchedules) return [];
     return calculatedSchedules.filter(({ project }) => {
-      const matchesSeason = selectedSeason === 'ALL' || project.season === selectedSeason;
-      const matchesCategory = selectedCategory === 'ALL' || project.category === selectedCategory;
-      const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesSeason && matchesCategory && matchesSearch;
+      const matchesSeason = selectedSeason === 'ALL' || project.primary_season_id === selectedSeason;
+      const matchesSearch = (project.name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesSeason && matchesSearch;
     });
-  }, [calculatedSchedules, selectedSeason, selectedCategory, searchQuery]);
+  }, [calculatedSchedules, selectedSeason, searchQuery]);
 
-  const handleSelectProject = (projectId: string) => {
-    setSelectedProjectId(projectId);
-    setActiveScenario({ ...initialScenarioState, projectId });
-    setIsDrawerOpen(true);
-  };
+  // DYNAMIC TIME SCALE LOGIC
+  const timeScale = useMemo(() => {
+    const firstDate = new Date('2026-09-01');
+    const lastDate = new Date('2027-06-30');
+    let months = [];
+    let current = new Date(firstDate);
 
-  const handleCloseDrawer = () => {
-    setIsDrawerOpen(false);
-    setSelectedProjectId(null);
-  };
+    while (current <= lastDate) {
+        months.push({
+            name: current.toLocaleString('default', { month: 'short' }).toUpperCase(),
+            year: current.getFullYear()
+        });
+        current.setMonth(current.getMonth() + 1);
+    }
+    
+    let containerWidth = zoomLevel === 'monthly' ? 1200 : 2400; // Wider for weekly view
 
-  const handleResetScenario = () => {
-    if (selectedProjectId) setActiveScenario({ ...initialScenarioState, projectId: selectedProjectId });
-  };
-
-  const timeScale = useMemo(() => ({
-    months: [
-      { name: 'OCT', year: 2026 }, { name: 'NOV', year: 2026 }, { name: 'DEC', year: 2026 },
-      { name: 'JAN', year: 2027 }, { name: 'FEB', year: 2027 }, { name: 'MAR', year: 2027 },
-      { name: 'APR', year: 2027 }, { name: 'MAY', year: 2027 },
-    ],
-    startDay: '2026-10-01',
-    endDay: '2027-05-31',
-  }), []);
+    return {
+        months,
+        startDay: '2026-09-01',
+        endDay: '2027-06-30',
+        containerWidth: `${containerWidth}px`
+    };
+  }, [zoomLevel]);
+  
+  if (loadingError) return <div className="p-6 text-red-600">{loadingError}</div>;
+  if (!rawData) return <div className="p-6">Loading...</div>;
 
   return (
-    <>
-      <div className="min-h-screen bg-slate-50/50 p-6 md:p-8">
-        <header className="mb-8">
-          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-            <span>🇨🇭</span> GTM Control Tower
-          </h1>
-          <p className="text-sm text-slate-500 font-medium mt-1">
-            Special Projects & Collaborations Governance & Dynamic Planning Layer
-          </p>
-        </header>
-
-        <ControlBar {...{ selectedSeason, setSelectedSeason, selectedCategory, setSelectedCategory, selectedTeam, setSelectedTeam, searchQuery, setSearchQuery }} />
-
-        <main className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-          <TimelineAxis timeScale={timeScale} />
-          <div className="divide-y divide-gray-100">
-            {filteredRows.map(({ project, schedules }) => (
-              <ProjectSwimlane
-                key={project.id}
-                project={project}
-                schedules={schedules}
-                scenarioSchedules={project.id === selectedProjectId && scenarioSchedules ? scenarioSchedules : undefined}
-                timeScale={timeScale}
-                onSelectProject={handleSelectProject}
-              />
-            ))}
+    <div className="min-h-screen bg-slate-50/50 p-6 md:p-8">
+        <header className="mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+              <span>🇨🇭</span> GTM Control Tower
+            </h1>
           </div>
-        </main>
-      </div>
-
-      {isDrawerOpen && selectedProjectId && (
-        <ScenarioDrawer 
-          scenario={activeScenario}
-          setScenario={setActiveScenario}
-          onClose={handleCloseDrawer}
-          resetScenario={handleResetScenario}
-        />
-      )}
-    </>
+          <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 shadow-inner">
+            <button 
+              onClick={() => setZoomLevel('monthly')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${zoomLevel === 'monthly' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              Monthly
+            </button>
+            <button 
+              onClick={() => setZoomLevel('weekly')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${zoomLevel === 'weekly' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              Weekly
+            </button>
+          </div>
+        </header>
+        <ControlBar {...{ selectedSeason, setSelectedSeason, selectedCategory, setSelectedCategory, selectedTeam, setSelectedTeam, searchQuery, setSearchQuery }} />
+        <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden mt-6">
+            <div className="overflow-x-auto">
+                <div style={{ minWidth: timeScale.containerWidth }}>
+                    <TimelineAxis timeScale={timeScale} />
+                    <div className="divide-y divide-gray-100">
+                    {filteredRows.map(({ project, schedules }) => (
+                        <ProjectSwimlane
+                        key={project.project_id}
+                        project={project}
+                        schedules={schedules}
+                        timeScale={timeScale}
+                        />
+                    ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
   );
 };
 
